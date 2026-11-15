@@ -79,6 +79,9 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# Сгенерированная OpenAPI-спецификация
+frontend/openapi.json
+
 # Кэш сборщиков и TypeScript
 .npm/
 .eslintcache
