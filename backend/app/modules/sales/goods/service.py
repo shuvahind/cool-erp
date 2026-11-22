@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.access.schemas import AccessResult, UserProtocol
 from app.core.access.service import AccessService, DocumentProtocol
+from app.core.audit import service as audit_service  # <--- ДОБАВЛЕН ИМПОРТ
 from app.core.events.outbox import outbox
 from app.modules.sales.goods.crud import crud_goods
 from app.modules.sales.goods.models import SalesGoodsModel
@@ -30,11 +31,6 @@ class GoodsService:
     ) -> SalesGoodsModel:
         """
         Создание товара + публикация события репликации.
-
-        Проверка доступа:
-        - создаём экземпляр документа с author_id = user.id;
-        - проверяем AccessService.resolve_access();
-        - создание разрешено только при level >= 2.
         """
         if user_id != user.id:
             raise PermissionError("Некорректный пользователь операции")
@@ -52,10 +48,6 @@ class GoodsService:
         goods = SalesGoodsModel(**data_dict)
 
         access_service = AccessService(db)
-
-        # Правило №45: каст экземпляра документа к DocumentProtocol.
-        # Экземпляр новый, ещё не сохранён в БД, но уже содержит контракт доступа:
-        # tenant_id, section_id, author_id, or_tags, and_tags.
         goods_doc: DocumentProtocol = typing_cast("DocumentProtocol", goods)
         access: AccessResult = await access_service.resolve_access(user, goods_doc)
 
@@ -111,6 +103,13 @@ class GoodsService:
         if user_id != user.id:
             raise PermissionError("Некорректный пользователь операции")
 
+        # ✅ 1. Загружаем товар один раз (для снимка аудита)
+        goods_before = await crud_goods.get(db, id=goods_id)
+        if goods_before is None:
+            from app.modules.sales.goods.crud import GoodsNotFoundError
+            raise GoodsNotFoundError("Товар не найден")
+
+        # ✅ 2. Удаляем
         deleted = await crud_goods.mark_deleted(
             db,
             goods_id=goods_id,
@@ -118,6 +117,17 @@ class GoodsService:
             tenant_id=current_tenant_id,
             user_id=user_id,
             is_superadmin=is_superadmin,
+        )
+
+        # ✅ 3. Аудит внутри сервиса (роутер об этом вообще не знает)
+        await audit_service.log_data_delete_snapshot(
+            db,
+            tenant_id=deleted.tenant_id,
+            user_id=user_id,
+            entity_type="goods",
+            entity_id=deleted.id,
+            entity_name=deleted.name,
+            obj=goods_before,
         )
 
         await self._publish_event(
@@ -128,6 +138,7 @@ class GoodsService:
         )
         return deleted
 
+
     async def _publish_event(
         self,
         db: AsyncSession,
@@ -136,12 +147,7 @@ class GoodsService:
         *,
         is_deleted: bool = False,
     ) -> None:
-        """
-        Публикация события изменения товара для репликации.
-
-        Контракт доступа обязателен в каждом событии:
-        tenant_id, section_id, author_id, or_tags, and_tags.
-        """
+        """Публикация события изменения товара для репликации."""
         await outbox.publish(
             db,
             event_type=event_type,

@@ -208,6 +208,17 @@ async def delete_section(
 ) -> ApiResponse[SectionResponseSchema]:
     """Удаление произвольного раздела."""
     try:
+        # ✅ 1. Получаем раздел ДО удаления (для снимка)
+        section_before = await crud_section.get_for_user(
+            db,
+            section_id=section_id,
+            tenant_id=current_session.tenant_id,
+            is_superadmin=bool(current_session.is_superadmin),
+        )
+        if not section_before:
+            raise SectionNotFoundError("Раздел не найден")
+
+        # ✅ 2. Удаляем
         section = await crud_section.delete_custom(
             db,
             section_id=section_id,
@@ -217,16 +228,16 @@ async def delete_section(
             is_superadmin=bool(current_session.is_superadmin),
         )
 
-        # ✅ Аудит удаления — в той же транзакции, через сервис
-        await audit_service.log_data_delete(
+        # ✅ 3. Аудит — автоматический сбор снимка
+        await audit_service.log_data_delete_snapshot(
             db,
             tenant_id=section.tenant_id or current_session.tenant_id,
             user_id=current_session.id,
             entity_type="section",
             entity_id=section.id,
             entity_name=section.name,
+            obj=section_before,  # <--- передаем объект
         )
-
 
         await db.commit()
     except SectionNotFoundError as exc:

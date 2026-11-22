@@ -37,7 +37,7 @@ async def list_warehouses(
     db: DBSession,
     session: CurrentUser,
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, gt=0, le=1000),   # ✅ защита от ZeroDivisionError
+    limit: int = Query(100, gt=0, le=1000),
     search: str | None = None,
 ) -> ApiResponse[PaginatedResponse[InvWarehouseResponseSchema]]:
     """Список складов с контролем доступа через AccessService (все 5 слоёв)."""
@@ -82,7 +82,6 @@ async def create_warehouse(
             is_superadmin=bool(session.is_superadmin),
         )
 
-        # ✅ Аудит создания — в той же транзакции, через сервис
         await audit_service.log_data_create(
             db,
             tenant_id=warehouse.tenant_id,
@@ -93,8 +92,7 @@ async def create_warehouse(
             changes=data.model_dump(mode="json"),
         )
 
-
-        await db.commit()          # ✅ ОДИН коммит на всю операцию
+        await db.commit()
         await db.refresh(warehouse)
     except PermissionError as exc:
         await db.rollback()
@@ -151,7 +149,6 @@ async def update_warehouse(
     session: CurrentUser,
 ) -> ApiResponse[InvWarehouseResponseSchema]:
     """Сохранение с проверкой версии (409), блокировки (423) и контроля доступа."""
-    # ✅ old_values собираем ДО warehouse_service.update — иначе diff будет old == new
     warehouse_before = await crud_warehouse.get(db, id=warehouse_id)
     old_values: dict[str, uuid.UUID | str | None] = {}
     if warehouse_before:
@@ -170,7 +167,6 @@ async def update_warehouse(
             is_superadmin=bool(session.is_superadmin),
         )
 
-        # ✅ Аудит обновления — в той же транзакции, через сервис
         await audit_service.log_data_update(
             db,
             tenant_id=warehouse.tenant_id,
@@ -182,8 +178,7 @@ async def update_warehouse(
             new_values=data.model_dump(exclude_unset=True),
         )
 
-
-        await db.commit()          # ✅ ОДИН коммит на update + audit
+        await db.commit()
         await db.refresh(warehouse)
     except WarehouseNotFoundError as exc:
         await db.rollback()
@@ -223,6 +218,7 @@ async def delete_warehouse(
 ) -> ApiResponse[InvWarehouseResponseSchema]:
     """Мягкое удаление с проверкой блокировки (423) и контроля доступа (can_delete)."""
     try:
+        # ✅ Всё (включая аудит) делает сервис
         warehouse = await warehouse_service.delete(
             db,
             warehouse_id=warehouse_id,
@@ -232,18 +228,7 @@ async def delete_warehouse(
             is_superadmin=bool(session.is_superadmin),
         )
 
-        # ✅ Аудит удаления — в той же транзакции, через сервис
-        await audit_service.log_data_delete(
-            db,
-            tenant_id=warehouse.tenant_id,
-            user_id=session.id,
-            entity_type="warehouse",
-            entity_id=warehouse.id,
-            entity_name=warehouse.name,
-        )
-
-
-        await db.commit()          # ✅ ОДИН коммит на delete + audit
+        await db.commit()
     except WarehouseNotFoundError as exc:
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
@@ -272,7 +257,6 @@ async def delete_warehouse(
 # БЛОКИРОВКИ РЕДАКТИРОВАНИЯ (Правило №40, часть 7.1)
 # ================================================================
 
-
 @router.post(
     "/{warehouse_id}/lock",
     response_model=ApiResponse[InvWarehouseResponseSchema],
@@ -292,8 +276,6 @@ async def acquire_warehouse_lock(
             user_id=session.id,
             is_superadmin=bool(session.is_superadmin),
         )
-
-
 
         await db.commit()
         await db.refresh(warehouse)
@@ -340,8 +322,6 @@ async def release_warehouse_lock(
             user_id=session.id,
             is_superadmin=bool(session.is_superadmin),
         )
-
-
 
         await db.commit()
         await db.refresh(warehouse)

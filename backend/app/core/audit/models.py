@@ -107,7 +107,7 @@ class DataAuditLog(Base):
     changes: Mapped[dict[str, Any] | None] = mapped_column(
         MutableDict.as_mutable(JSONB),
         nullable=True,
-        comment='{"field_name": {"old": ..., "new": ...}} или {"new": {...}}',
+        comment='{"field_name": {"old": str | null, "new": str | null}} — null означает "пусто"',
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

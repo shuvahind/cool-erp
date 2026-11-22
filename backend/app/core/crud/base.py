@@ -251,7 +251,7 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
 
         ⚠️ ПРАВИЛО №40 ч.8.1: только flush(), НЕ commit().
         Транзакцией и аудитом владеет роутер:
-            crud.remove() → audit_service.log_data_delete() → db.commit()
+            crud.remove() → audit_service.log_data_delete_snapshot() → db.commit()
         """
         db_obj = await self.get(db, id=id)
         if not db_obj:

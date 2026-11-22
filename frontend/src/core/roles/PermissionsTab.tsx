@@ -211,9 +211,9 @@ export const PermissionsTab = ({
       )} */}
 
       {/* Таблица полномочий */}
-      <div className="rounded-md border">
+      <div className="rounded-md border max-h-[300px] overflow-y-auto relative">
         <Table>
-          <TableHeader>
+          <TableHeader className="sticky top-0 bg-background z-10">
             <TableRow className="h-10 hover:bg-transparent">
               <TableHead className="py-1">Тип документа</TableHead>
               <TableHead className="py-1 text-center w-20">Полный</TableHead>

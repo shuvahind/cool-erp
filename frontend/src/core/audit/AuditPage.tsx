@@ -48,11 +48,139 @@ const getEntityTypeName = (entityType: string): string => {
 const formatAuditValue = (val: any) => {
   if (val === null || val === undefined || val === "") return "пусто";
   if (Array.isArray(val)) {
-    if (val.length === 0) return "[]";
-    return `[Массив: ${val.length}]`;
+    if (val.length === 0) return "пусто";
+    return val.join(", "); // Выводим элементы через запятую
   }
   if (typeof val === "object") return JSON.stringify(val);
   return String(val);
+};
+
+// ✅ ВЫНЕСЕННЫЙ КОМПОНЕНТ ДЛЯ АККОРДЕОНА
+const AuditChangesCell = ({ 
+  changes, 
+  action 
+}: { 
+  changes: Record<string, any>; 
+  action: string;
+}) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const entries = Object.entries(changes);
+  const LIMIT = 3;
+
+  const hasMore = entries.length > LIMIT;
+  const visibleEntries = isExpanded ? entries : entries.slice(0, LIMIT);
+
+  const renderNewValue = (text: string) => {
+    if (text.includes("[Удалено]") || text.includes("[Добавлен]")) {
+      const parts = text.split(/(?=\[Добавлен\]|\[Удалено\])/g);
+      return parts.map((part, idx) => {
+        const trimmed = part.trim();
+        if (trimmed.startsWith("[Удалено]")) {
+          return (
+            <div key={idx} className="flex items-start gap-1 mb-1">
+              <Badge
+                variant="destructive"
+                className="text-[9px] px-1 py-0 h-4 mt-0.5 shrink-0"
+              >
+                Удалено
+              </Badge>
+              <span className="text-gray-500 break-words">
+                {trimmed.replace("[Удалено]", "").trim()}
+              </span>
+            </div>
+          );
+        }
+        if (trimmed.startsWith("[Добавлен]")) {
+          return (
+            <div key={idx} className="flex items-start gap-1 mb-1">
+              <Badge
+                variant="default"
+                className="bg-green-600 text-[9px] px-1 py-0 h-4 mt-0.5 shrink-0"
+              >
+                Добавлен
+              </Badge>
+              <span className="text-green-700 font-medium break-words">
+                {trimmed.replace("[Добавлен]", "").trim()}
+              </span>
+            </div>
+          );
+        }
+        return (
+          <div key={idx} className="mb-1 break-words">
+            {trimmed}
+          </div>
+        );
+      });
+    }
+    return (
+      <span className="text-green-600 font-medium break-words">{text}</span>
+    );
+  };
+
+  return (
+    <div className="space-y-1 text-xs w-full">
+      <div className="w-full">
+        {visibleEntries.map(([field, val]: [string, any]) => {
+          const oldVal = formatAuditValue(val?.old);
+          const newVal = formatAuditValue(val?.new);
+          
+          const isNewEmpty = newVal === "пусто";
+          const isOldEmpty = oldVal === "пусто";
+
+          return (
+            <div
+              key={field}
+              className="mb-2 border-b border-gray-100 pb-1 last:border-0 last:pb-0"
+            >
+              <div className="font-semibold text-gray-700 mb-0.5">{field}:</div>
+              <div className="flex flex-col gap-1">
+                {/* 1. Вывод СТАРОГО значения */}
+                {action !== "create" && !isOldEmpty && (
+                  <div className="text-gray-400 text-[10px] mb-1 break-words whitespace-pre-wrap">
+                    {oldVal}
+                  </div>
+                )}
+
+                {/* 2. Вывод НОВОГО значения */}
+                {action === "update" ? (
+                  // При обновлении: если пусто — пишем "Удалено" красным
+                  <div className="break-words whitespace-pre-wrap">
+                    {isNewEmpty ? (
+                      <div className="flex items-start gap-1 mb-1">
+                        <Badge variant="destructive" className="text-[9px] px-1 py-0 h-4 mt-0.5 shrink-0">
+                          Удалено
+                        </Badge>
+                      </div>
+                    ) : (
+                      renderNewValue(newVal)
+                    )}
+                  </div>
+                ) : (
+                  // При create: показываем только если не пусто. При delete: не показываем вообще (и так всё понятно из "Удалено")
+                  action !== "delete" && !isNewEmpty && (
+                    <div className="break-words whitespace-pre-wrap">
+                      {renderNewValue(newVal)}
+                    </div>
+                  )
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {hasMore && (
+        <Button
+          variant="link"
+          size="sm"
+          className="text-xs h-6 px-0 text-blue-600 mt-1 font-semibold"
+          onClick={() => setIsExpanded((v) => !v)}
+        >
+          {isExpanded ? "Свернуть" : `Показать все (${entries.length - LIMIT})`}
+        </Button>
+      )}
+    </div>
+  );
 };
 
 export const AuditPage = ({ className }: AuditPageProps) => {
@@ -144,10 +272,7 @@ export const AuditPage = ({ className }: AuditPageProps) => {
     if (endDate) params.append("end_date", endDate);
 
     try {
-      // ✅ Берем базовый URL из переменных окружения Vite (там, где у вас прописан путь до бэкенда)
-      // Если переменной нет, используем localhost как fallback
       const baseUrl = import.meta.env.VITE_API_URL || "http://localhost:8000";
-
       const response = await fetch(
         `${baseUrl}/api/v1/audit/export?${params.toString()}`,
         {
@@ -164,10 +289,7 @@ export const AuditPage = ({ className }: AuditPageProps) => {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-
-      // ✅ Добавляем расширение .csv
       a.download = `audit_${new Date().toISOString().slice(0, 10)}.csv`;
-
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -362,10 +484,10 @@ export const AuditPage = ({ className }: AuditPageProps) => {
                   <Table className="table-fixed w-full min-w-[800px]">
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="w-[20%]">Пользователь</TableHead>
-                        <TableHead className="w-[25%]">Сущность</TableHead>
+                        <TableHead className="w-[15%]">Пользователь</TableHead>
+                        <TableHead className="w-[20%]">Сущность</TableHead>
                         <TableHead className="w-[10%]">Действие</TableHead>
-                        <TableHead className="w-[35%]">Изменения</TableHead>
+                        <TableHead className="w-[45%]">Изменения</TableHead>
                         <TableHead className="w-[10%]">Дата</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -375,7 +497,7 @@ export const AuditPage = ({ className }: AuditPageProps) => {
                           <TableCell className="align-top truncate">
                             {change.user_email || "Система"}
                           </TableCell>
-                          <TableCell className="align-top truncate whitespace-normal">
+                          <TableCell className="align-top truncate whitespace-normal break-words">
                             {change.entity_name
                               ? `${getEntityTypeName(change.entity_type)}: ${change.entity_name}`
                               : `${getEntityTypeName(change.entity_type)}: ${change.entity_id}`}
@@ -383,33 +505,21 @@ export const AuditPage = ({ className }: AuditPageProps) => {
                           <TableCell className="align-top">
                             {change.action}
                           </TableCell>
-                          <TableCell className="align-top">
+
+                          {/* ✅ ИСПОЛЬЗУЕМ НОВЫЙ КОМПОНЕНТ ЗДЕСЬ */}
+                          <TableCell className="align-top break-words whitespace-normal">
                             {change.changes ? (
-                              // ✅ max-h и overflow-y-auto не дают колонке растянуться в высоту
-                              <div className="space-y-1 text-xs max-h-[120px] overflow-y-auto pr-2">
-                                {Object.entries(
-                                  change.changes as Record<string, any>,
-                                ).map(([field, val]: [string, any]) => (
-                                  <div key={field} className="break-all">
-                                    <span className="font-medium">
-                                      {field}:
-                                    </span>{" "}
-                                    <span className="text-red-500">
-                                      {formatAuditValue(val?.old)}
-                                    </span>
-                                    {" → "}
-                                    <span className="text-green-600">
-                                      {formatAuditValue(val?.new)}
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
+                              <AuditChangesCell
+                                changes={change.changes as Record<string, any>}
+                                action={change.action}
+                              />
                             ) : (
                               <span className="text-muted-foreground">
                                 Нет изменений
                               </span>
                             )}
                           </TableCell>
+
                           <TableCell className="align-top whitespace-nowrap text-xs">
                             {new Date(change.created_at).toLocaleString()}
                           </TableCell>

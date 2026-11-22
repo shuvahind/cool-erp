@@ -4,7 +4,7 @@ import uuid
 import logging
 from typing import TYPE_CHECKING, cast as typing_cast # pyright: ignore[reportUnusedImport]
 from sqlalchemy.ext.asyncio import AsyncSession
-
+from app.core.audit import service as audit_service
 from app.core.events.outbox import outbox
 from app.modules.inventory.warehouses.crud import crud_warehouse
 from app.modules.inventory.warehouses.models import InvWarehouseModel
@@ -97,14 +97,33 @@ class WarehouseService:
         is_superadmin: bool = False,
     ) -> InvWarehouseModel:
         """Мягкое удаление склада с проверкой блокировки и контроля доступа."""
+        # ✅ 1. Загружаем склад ДО удаления (для снимка аудита)
+        warehouse_before = await crud_warehouse.get(db, id=warehouse_id)
+        if warehouse_before is None:
+            from app.modules.inventory.warehouses.crud import WarehouseNotFoundError
+            raise WarehouseNotFoundError("Склад не найден")
+
+        # ✅ 2. Удаляем
         deleted = await crud_warehouse.mark_deleted(
             db,
             warehouse_id=warehouse_id,
-            user=user,  # ✅ НОВОЕ: передача user для контроля доступа
+            user=user,
             tenant_id=current_tenant_id,
             user_id=user_id,
             is_superadmin=is_superadmin,
         )
+
+        # ✅ 3. Аудит внутри сервиса
+        await audit_service.log_data_delete_snapshot(
+            db,
+            tenant_id=deleted.tenant_id,
+            user_id=user_id,
+            entity_type="warehouse",
+            entity_id=deleted.id,
+            entity_name=deleted.name,
+            obj=warehouse_before,
+        )
+
         await outbox.publish(
             db,
             event_type="inventory.warehouse.deleted",

@@ -171,7 +171,7 @@ class CRUDUser(CRUDBase[UserModel, UserRegisterSchema, UserUpdateSchema]):
         ⚠️ ТРАНЗАКЦИЯ: только flush(), НЕ commit().
         Транзакцией и аудитом владеет роутер (`delete_user` в router.py):
             crud_user.remove() → flush
-            audit_service.log_data_delete() → db.add
+            audit_service.log_data_delete_snapshot() → db.add
             db.commit()
             clear_user_sessions()   # ✅ ПОСЛЕ commit
 

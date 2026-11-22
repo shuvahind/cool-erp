@@ -5,26 +5,11 @@ from typing import cast
 import uuid
 
 from fastapi import APIRouter, HTTPException, Query, status
+from datetime import date
 
 from app.core.access.schemas import UserProtocol
 from app.core.audit import service as audit_service
 from app.core.auth.dependencies import CurrentUser, DBSession
-from app.core.schemas import ApiResponse, PaginatedResponse
-from app.modules.sales.goods.crud import (
-    GoodsEditingLockedError,
-    GoodsNotFoundError,
-    GoodsVersionConflictError,
-    crud_goods,
-)
-from app.modules.sales.goods.schemas import (
-    SalesGoodsCreateSchema,
-    SalesGoodsResponseSchema,
-    SalesGoodsUpdateSchema,
-)
-from app.modules.sales.goods.service import goods_service
-# ======
-from datetime import date
-
 from app.core.schemas import ApiResponse, PaginatedResponse, SortOrder
 from app.modules.sales.goods.crud import (
     GoodsEditingLockedError,
@@ -39,7 +24,7 @@ from app.modules.sales.goods.schemas import (
     SalesGoodsSortField,
     SalesGoodsUpdateSchema,
 )
-
+from app.modules.sales.goods.service import goods_service
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +73,7 @@ async def list_goods(
         ),
     )
 
+
 @router.post(
     "/",
     response_model=ApiResponse[SalesGoodsResponseSchema],
@@ -119,7 +105,6 @@ async def create_goods(
             changes=data.model_dump(mode="json"),
         )
 
-
         await db.commit()          # ✅ ОДИН коммит на всю операцию
         await db.refresh(goods)
     except PermissionError as exc:
@@ -138,35 +123,6 @@ async def create_goods(
         message="Товар создан",
         data=SalesGoodsResponseSchema.model_validate(goods),
     )
-
-
-@router.get(
-    "/{goods_id}",
-    response_model=ApiResponse[SalesGoodsResponseSchema],
-)
-async def get_goods(
-    goods_id: uuid.UUID,
-    db: DBSession,
-    session: CurrentUser,
-) -> ApiResponse[SalesGoodsResponseSchema]:
-    """Один товар с контролем доступа."""
-    goods = await crud_goods.get_for_user(
-        db,
-        goods_id=goods_id,
-        user=cast(UserProtocol, session),
-        tenant_id=session.tenant_id,
-        is_superadmin=bool(session.is_superadmin),
-    )
-
-    if goods is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Товар не найден")
-
-    return ApiResponse(
-        success=True,
-        message="Товар получен",
-        data=SalesGoodsResponseSchema.model_validate(goods),
-    )
-
 
 @router.put(
     "/{goods_id}",
@@ -210,7 +166,6 @@ async def update_goods(
             new_values=data.model_dump(exclude_unset=True),
         )
 
-
         await db.commit()          # ✅ ОДИН коммит на update + audit
         await db.refresh(goods)
     except GoodsNotFoundError as exc:
@@ -223,10 +178,15 @@ async def update_goods(
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_423_LOCKED, detail=str(exc)) from exc
     except GoodsPermissionError as exc:
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
-
-    await db.commit()
-    await db.refresh(goods)
+    except Exception as exc:
+        await db.rollback()
+        logger.error("Ошибка обновления товара %s: %s", goods_id, str(exc), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Ошибка обновления товара",
+        ) from exc
 
     return ApiResponse(
         success=True,
@@ -246,6 +206,7 @@ async def delete_goods(
 ) -> ApiResponse[SalesGoodsResponseSchema]:
     """Мягкое удаление с проверкой блокировки и can_delete."""
     try:
+        # ✅ Всё делает сервис: загружает, удаляет, пишет аудит
         goods = await goods_service.delete(
             db,
             goods_id=goods_id,
@@ -254,19 +215,7 @@ async def delete_goods(
             current_tenant_id=session.tenant_id,
             is_superadmin=bool(session.is_superadmin),
         )
-
-        # ✅ Аудит удаления — в той же транзакции, через сервис
-        await audit_service.log_data_delete(
-            db,
-            tenant_id=goods.tenant_id,
-            user_id=session.id,
-            entity_type="goods",
-            entity_id=goods.id,
-            entity_name=goods.name,
-        )
-
-
-        await db.commit()          # ✅ ОДИН коммит на delete + audit
+        await db.commit()
     except GoodsNotFoundError as exc:
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
@@ -307,8 +256,6 @@ async def acquire_goods_lock(
             user_id=session.id,
             is_superadmin=bool(session.is_superadmin),
         )
-
-
 
         await db.commit()
         await db.refresh(goods)
@@ -352,7 +299,6 @@ async def release_goods_lock(
             user_id=session.id,
             is_superadmin=bool(session.is_superadmin),
         )
-
 
         await db.commit()
         await db.refresh(goods)

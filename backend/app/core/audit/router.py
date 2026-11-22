@@ -1,9 +1,10 @@
 """backend/app/core/audit/router.py"""
+
 import csv
 import logging
 from datetime import datetime, time, timedelta
 from io import StringIO
-from typing import Any, AsyncIterator, cast
+from typing import Any, AsyncIterator, cast, Tuple
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -26,11 +27,7 @@ router = APIRouter(prefix="/api/v1/audit", tags=["Audit: access logs"])
 # ПРОВЕРКА ПРАВ
 # ==================================================================
 def _ensure_audit_access(session: CurrentUser) -> None:
-    """Аудит доступен только администратору или суперадмину.
-
-    ⚠️ Аудит — конфиденциальные данные (IP-адреса, email пользователей,
-    old/new значения полей). Обычный пользователь не должен его видеть.
-    """
+    """Аудит доступен только администратору или суперадмину."""
     if not session.is_superadmin and not session.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -47,12 +44,7 @@ async def _collect_user_emails(
     *,
     tenant_id: UUID | None = None,
 ) -> dict[UUID, str]:
-    """Собирает email по списку user_id одним запросом.
-
-    Если tenant_id передан — фильтруем по нему (для админа тенанта,
-    чтобы не вытащить email пользователя чужого тенанта, если
-    в audit_log окажется чужой user_id).
-    """
+    """Собирает email по списку user_id одним запросом."""
     if not user_ids:
         return {}
     stmt = select(User.id, User.email).where(User.id.in_(user_ids))
@@ -81,30 +73,37 @@ async def _fetch_user_emails_for_filter(
 
 
 def _normalize_end_date(end_date: datetime) -> datetime:
-    """Нормализует end_date до конца дня (включительно).
-
-    Если клиент передал дату без времени — берём конец этого дня.
-    Если передал datetime — используем как есть (точная граница).
-    """
+    """Нормализует end_date до конца дня (включительно)."""
     if end_date.time() == time.min:
-        # передана только дата — включаем весь день
         return end_date + timedelta(days=1)
     return end_date
 
 
-def _format_changes(changes: dict[str, Any] | None) -> str:
+def _format_changes_for_csv(changes: dict[str, Any] | None) -> Tuple[str, str]:
+    """Разделяет изменения на 'Было' и 'Стало' для CSV."""
     if not changes:
-        return ""
-    lines: list[str] = []
+        return "", ""
+
+    old_lines: list[str] = []
+    new_lines: list[str] = []
+
     for field, val in changes.items():
         if isinstance(val, dict):
             val_dict = cast(dict[str, Any], val)
-            old_val = val_dict.get("old", "—")
-            new_val = val_dict.get("new", "—")
-            lines.append(f"{field}: {old_val} → {new_val}")
+            old_val = val_dict.get("old")
+            new_val = val_dict.get("new")
+
+            # ✅ None / "" → пустая строка в CSV (Excel-ячейка остаётся пустой)
+            old_str = str(old_val) if old_val not in (None, "") else ""
+            new_str = str(new_val) if new_val not in (None, "") else ""
+
+            old_lines.append(f"{field}: {old_str}" if old_str else f"{field}: ")
+            new_lines.append(f"{field}: {new_str}" if new_str else f"{field}: ")
         else:
-            lines.append(f"{field}: {val}")
-    return "\n".join(lines)
+            val_str = str(val) if val not in (None, "") else ""
+            old_lines.append(f"{field}: {val_str}" if val_str else f"{field}:")
+
+    return "\n".join(old_lines), "\n".join(new_lines)
 
 
 def _build_audit_filter_conditions(
@@ -145,16 +144,15 @@ async def _stream_csv(
     filter_conditions: list[ColumnElement[bool]],
     user_emails: dict[UUID, str],
 ) -> AsyncIterator[str]:
-    """Генерирует CSV построчно, не загружая всю выборку в память.
-
-    ⚠️ Каждая строка пишется в новый StringIO — так csv.writer
-    не накапливает внутреннее состояние между yield'ами.
-    """
+    """Генерирует CSV построчно с колонками Было и Стало."""
     # Заголовок + BOM
     header_buffer = StringIO()
     header_buffer.write("\ufeff")
     header_writer = csv.writer(header_buffer, delimiter=";")
-    header_writer.writerow(["Дата", "Пользователь", "Сущность", "Действие", "Изменения"])
+    # ✅ Изменены заголовки для Excel
+    header_writer.writerow(
+        ["Дата", "Пользователь", "Сущность", "Действие", "Было", "Стало"]
+    )
     yield header_buffer.getvalue()
 
     base_stmt = (
@@ -171,15 +169,20 @@ async def _stream_csv(
             if item.entity_name
             else f"{item.entity_type}: {item.entity_id}"
         )
+
+        # ✅ Получаем строки для Было и Стало
+        old_text, new_text = _format_changes_for_csv(item.changes)
+
         row_buffer = StringIO()
         row_writer = csv.writer(row_buffer, delimiter=";")
         row_writer.writerow(
             [
                 item.created_at.strftime("%Y-%m-%d %H:%M:%S"),
-                user_emails.get(item.user_id) if item.user_id else "Система",
+                (user_emails.get(item.user_id) if item.user_id else None) or "Система",
                 entity,
                 item.action,
-                _format_changes(item.changes),
+                old_text,
+                new_text,
             ]
         )
         yield row_buffer.getvalue()
@@ -196,10 +199,10 @@ async def list_access_audit(
     session: CurrentUser,
     db: DBSession,
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, gt=0, le=1000),   # ✅ защита от ZeroDivisionError
+    limit: int = Query(100, gt=0, le=1000),
 ) -> ApiResponse[PaginatedResponse[AuditAccessRead]]:
     """Список логов доступа (только админ/суперадмин)."""
-    _ensure_audit_access(session)   # ✅ проверка прав
+    _ensure_audit_access(session)
 
     is_superadmin = bool(session.is_superadmin)
     tenant_id = session.tenant_id
@@ -233,7 +236,7 @@ async def list_access_audit(
     user_emails = await _collect_user_emails(
         db,
         unique_user_ids,
-        tenant_id=None if is_superadmin else tenant_id,   # ✅ для админа — только свой тенант
+        tenant_id=None if is_superadmin else tenant_id,
     )
 
     audit_items = [
@@ -276,7 +279,7 @@ async def list_data_audit(
     session: CurrentUser,
     db: DBSession,
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, gt=0, le=1000),   # ✅ защита от ZeroDivisionError
+    limit: int = Query(100, gt=0, le=1000),
     entity_type: str | None = None,
     action: str | None = None,
     entity_id: UUID | None = None,
@@ -285,7 +288,7 @@ async def list_data_audit(
     end_date: datetime | None = None,
 ) -> ApiResponse[PaginatedResponse[AuditDataRead]]:
     """Список изменений данных с пагинацией (только админ/суперадмин)."""
-    _ensure_audit_access(session)   # ✅ проверка прав
+    _ensure_audit_access(session)
 
     is_superadmin = bool(session.is_superadmin)
     tenant_id = session.tenant_id
@@ -327,7 +330,7 @@ async def list_data_audit(
     user_emails = await _collect_user_emails(
         db,
         unique_user_ids,
-        tenant_id=None if is_superadmin else tenant_id,   # ✅
+        tenant_id=None if is_superadmin else tenant_id,
     )
 
     audit_items = [
@@ -378,7 +381,7 @@ async def export_data_audit(
     end_date: datetime | None = None,
 ) -> StreamingResponse:
     """Экспорт изменений данных в CSV (стримингом, только админ/суперадмин)."""
-    _ensure_audit_access(session)   # ✅ проверка прав
+    _ensure_audit_access(session)
 
     is_superadmin = bool(session.is_superadmin)
     tenant_id = session.tenant_id
@@ -397,7 +400,7 @@ async def export_data_audit(
     user_emails = await _fetch_user_emails_for_filter(
         db,
         filter_conditions,
-        tenant_id=None if is_superadmin else tenant_id,   # ✅
+        tenant_id=None if is_superadmin else tenant_id,
     )
 
     return StreamingResponse(

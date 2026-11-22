@@ -7,7 +7,6 @@ from typing import cast as typing_cast
 from fastapi import APIRouter, HTTPException, Query, status
 
 from app.core.access.schemas import UserProtocol
-from app.core.audit import service as audit_service
 from app.core.auth.dependencies import CurrentUser, DBSession
 from app.core.notes.crud import crud_note
 from app.core.notes.exceptions import (
@@ -24,6 +23,7 @@ from app.core.notes.schemas import (
     NoteUpdateSchema,
     NoteSortField,
 )
+from app.core.notes.service import note_service
 from app.core.schemas import SortOrder, ApiResponse, PaginatedResponse
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,7 @@ async def get_notes(
     current_session: CurrentUser,
     db: DBSession,
     skip: int = Query(0, ge=0),
-    limit: int = Query(15, gt=0, le=1000),   # ✅ защита от ZeroDivisionError
+    limit: int = Query(15, gt=0, le=1000),
     search: str | None = None,
     sort_by: NoteSortField | None = None,
     sort_order: SortOrder = SortOrder.ASC,
@@ -112,26 +112,14 @@ async def create_note(
 ) -> ApiResponse[NoteResponseSchema]:
     """Создание заметки."""
     try:
-        note = await crud_note.create_for_user(
+        note = await note_service.create(
             db,
             obj_in=obj_in,
             user=typing_cast(UserProtocol, current_session),
-            tenant_id=current_session.tenant_id,
+            user_id=current_session.id,
+            current_tenant_id=current_session.tenant_id,
             is_superadmin=bool(current_session.is_superadmin),
         )
-
-        # ✅ Аудит создания — в той же транзакции, через сервис
-        await audit_service.log_data_create(
-            db,
-            tenant_id=note.tenant_id,
-            user_id=current_session.id,
-            entity_type="note",
-            entity_id=note.id,
-            entity_name=note.title,
-            changes=obj_in.model_dump(mode="json"),
-        )
- 
-
         await db.commit()
         await db.refresh(note)
     except SectionNotInTenantError as exc:
@@ -163,39 +151,16 @@ async def update_note(
     db: DBSession,
 ) -> ApiResponse[NoteResponseSchema]:
     """Сохранение с проверкой доступа, версии и блокировки."""
-    # ✅ old_values собираем ДО crud.save_with_version — иначе diff будет old == new
-    note_before = await crud_note.get(db, id=note_id)
-    old_values: dict[str, uuid.UUID | str | None] = {}
-    if note_before is not None:
-        dump = obj_in.model_dump(exclude_unset=True)
-        for field in NoteUpdateSchema.model_fields:
-            if field in dump:
-                old_values[field] = getattr(note_before, field, None)
-
     try:
-        note = await crud_note.save_with_version(
+        note = await note_service.update(
             db,
             note_id=note_id,
             obj_in=obj_in,
             user=typing_cast(UserProtocol, current_session),
-            tenant_id=current_session.tenant_id,
             user_id=current_session.id,
+            current_tenant_id=current_session.tenant_id,
             is_superadmin=bool(current_session.is_superadmin),
         )
-
-        # ✅ Аудит обновления — в той же транзакции, через сервис
-        await audit_service.log_data_update(
-            db,
-            tenant_id=note.tenant_id,
-            user_id=current_session.id,
-            entity_type="note",
-            entity_id=note.id,
-            entity_name=note.title,
-            old_values=old_values,
-            new_values=obj_in.model_dump(exclude_unset=True),
-        )
-
-
         await db.commit()
         await db.refresh(note)
     except NoteNotFoundError as exc:
@@ -239,26 +204,14 @@ async def delete_note(
 ) -> ApiResponse[NoteResponseSchema]:
     """Мягкое удаление с проверкой can_delete через AccessService."""
     try:
-        note = await crud_note.mark_deleted(
+        note = await note_service.delete(
             db,
             note_id=note_id,
             user=typing_cast(UserProtocol, current_session),
-            tenant_id=current_session.tenant_id,
             user_id=current_session.id,
+            current_tenant_id=current_session.tenant_id,
             is_superadmin=bool(current_session.is_superadmin),
         )
-
-        # ✅ Аудит удаления — в той же транзакции, через сервис
-        await audit_service.log_data_delete(
-            db,
-            tenant_id=note.tenant_id,
-            user_id=current_session.id,
-            entity_type="note",
-            entity_id=note.id,
-            entity_name=note.title,
-        )
-
-
         await db.commit()
     except NoteNotFoundError as exc:
         await db.rollback()
@@ -292,16 +245,14 @@ async def acquire_note_lock(
 ) -> ApiResponse[NoteResponseSchema]:
     """Захват пессимистической блокировки."""
     try:
-        note = await crud_note.acquire_editing_lock(
+        note = await note_service.acquire_lock(
             db,
             note_id=note_id,
             user=typing_cast(UserProtocol, current_session),
-            tenant_id=current_session.tenant_id,
             user_id=current_session.id,
+            current_tenant_id=current_session.tenant_id,
             is_superadmin=bool(current_session.is_superadmin),
         )
-
-
         await db.commit()
         await db.refresh(note)
     except NoteNotFoundError as exc:
@@ -339,16 +290,14 @@ async def release_note_lock(
 ) -> ApiResponse[NoteResponseSchema]:
     """Освобождение пессимистической блокировки."""
     try:
-        note = await crud_note.release_editing_lock(
+        note = await note_service.release_lock(
             db,
             note_id=note_id,
             user=typing_cast(UserProtocol, current_session),
-            tenant_id=current_session.tenant_id,
             user_id=current_session.id,
+            current_tenant_id=current_session.tenant_id,
             is_superadmin=bool(current_session.is_superadmin),
         )
-
-
         await db.commit()
         await db.refresh(note)
     except NoteNotFoundError as exc:
