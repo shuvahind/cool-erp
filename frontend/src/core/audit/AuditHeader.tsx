@@ -9,6 +9,7 @@ interface AuditHeaderProps {
     isFetching: boolean;
     onRefresh: () => void;
     onExport: () => void;
+    isExporting?: boolean; // ✅ Добавлен пропс
 }
 
 export const AuditHeader = ({
@@ -18,6 +19,7 @@ export const AuditHeader = ({
     isFetching,
     onRefresh,
     onExport,
+    isExporting = false,
 }: AuditHeaderProps) => {
     return (
         <div className="flex justify-between items-center shrink-0 gap-4 flex-wrap">
@@ -49,9 +51,16 @@ export const AuditHeader = ({
                     />
                     Обновить
                 </Button>
-                <Button onClick={onExport} variant="outline">
+
+                {/* ✅ Кнопка экспорта: значок остается, но кнопка блокируется на время скачивания */}
+                <Button
+                    onClick={onExport}
+                    variant="outline"
+                    disabled={isExporting}
+                    className={isExporting ? "opacity-70" : ""}
+                >
                     <Download className="h-4 w-4 mr-2" />
-                    Экспорт
+                    {isExporting ? "Скачивание..." : "Экспорт"}
                 </Button>
             </div>
         </div>

@@ -372,7 +372,7 @@ async def _stream_access_csv(
     header_buffer = StringIO()
     header_buffer.write("\ufeff")
     header_writer = csv.writer(header_buffer, delimiter=";")
-    header_writer.writerow(["Дата", "Пользователь", "Действие", "Ресурс", "Статус", "IP"])
+    header_writer.writerow(["Дата", "Пользователь", "Действие", "Статус", "IP"])
     yield header_buffer.getvalue()
 
     base_stmt = (
@@ -390,7 +390,6 @@ async def _stream_access_csv(
             item.created_at.strftime("%d.%m.%Y %H:%M:%S"),
             user_emails.get(item.user_id) if item.user_id else "Система",
             item.action,
-            item.resource,
             item.status,
             item.ip_address or "",
         ])

@@ -54,6 +54,7 @@ export interface ReferenceSelectProps<T extends ReferenceItem> {
   selectedLabel?: string;
   heading?: string;
   columns?: ReferenceColumn[];
+  triggerClassName?: string; // ✅ Новый пропс  
 }
 
 export function ReferenceSelect<T extends ReferenceItem>({
@@ -67,6 +68,7 @@ export function ReferenceSelect<T extends ReferenceItem>({
   selectedLabel,
   heading,
   columns,
+  triggerClassName, // ✅ Добавили в деструктуризацию
 }: ReferenceSelectProps<T>) {
   const [open, setOpen] = useState(false);
   const [searchInput, setSearchInput] = useState("");
@@ -303,7 +305,8 @@ export function ReferenceSelect<T extends ReferenceItem>({
           variant="outline"
           role="combobox"
           aria-expanded={open}
-          className="w-full justify-between font-normal"
+          // ✅ Применяем className
+          className={cn("w-full justify-between font-normal", triggerClassName)}
           disabled={disabled}
         >
           <span className={cn("truncate", !value && "text-muted-foreground")}>
@@ -361,16 +364,16 @@ export function ReferenceSelect<T extends ReferenceItem>({
               {/* Вложенный div с gap-4, идентичный строке данных */}
               <div className="flex-1 flex items-center gap-4 min-w-0">
 
-                { colunmsLength === 1 && <span className="w-[236px] shrink-0">Название</span> }
-                { colunmsLength === 2 && <span className="w-[80px] shrink-0">Название</span> }
-                
+                {colunmsLength === 1 && <span className="w-[236px] shrink-0">Название</span>}
+                {colunmsLength === 2 && <span className="w-[80px] shrink-0">Название</span>}
+
                 {columns.map((col) => {
                   // Выносим определение класса в переменную для удобства чтения
                   const widthClass = colunmsLength === 2 ? "w-[140px]" : "w-[240px]";
 
                   return (
-                    <span 
-                      key={col.column} 
+                    <span
+                      key={col.column}
                       className={`${widthClass} shrink-0 truncate`}
                     >
                       {col.label}

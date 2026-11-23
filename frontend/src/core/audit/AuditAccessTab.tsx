@@ -1,20 +1,19 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { format } from "date-fns";
 import { ru } from "date-fns/locale";
 import type { DateRange } from "react-day-picker";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ReferenceSelect, type ReferenceItem } from "@/lib/reusable/ReferenceSelect";
 import { readUsersUsersGet } from "@/api/generated/users/users";
 import { useListAccessAuditApiV1AuditAccessGet } from "@/api/generated/audit-access-logs/audit-access-logs";
-import { User, X, CalendarIcon, Settings2, Search, LogIn, LogOut } from "lucide-react";
+import { User, X, CalendarIcon, Settings2, Search, LogIn, LogOut, ShieldAlert } from "lucide-react";
 import { AuditPagination } from "./AuditPagination";
-import { AuditHeader } from "./AuditHeader"; // ✅ ИМПОРТ ШАПКИ
+import { AuditHeader } from "./AuditHeader";
 import React from "react";
-import { ShieldAlert } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface AuditAccessTabProps {
     activeTab: "access" | "data";
@@ -34,6 +33,9 @@ export const AuditAccessTab = ({ activeTab, onTabChange }: AuditAccessTabProps) 
     const startDate = dateRange?.from ? format(dateRange.from, "yyyy-MM-dd") : undefined;
     const endDate = dateRange?.to ? format(dateRange.to, "yyyy-MM-dd") : undefined;
     const skip = (page - 1) * pageSize;
+
+    const [isExporting, setIsExporting] = useState(false);
+    const exportRef = useRef(false); // ✅ Мгновенный флаг
 
     const { data, isLoading, isFetching, refetch } = useListAccessAuditApiV1AuditAccessGet(
         {
@@ -58,6 +60,9 @@ export const AuditAccessTab = ({ activeTab, onTabChange }: AuditAccessTabProps) 
         if (statusFilter) params.append("status", statusFilter);
         if (startDate) params.append("start_date", startDate);
         if (endDate) params.append("end_date", endDate);
+        if (exportRef.current) return; // ✅ Если уже качаем — выходим
+        exportRef.current = true;
+        setIsExporting(true);
 
         try {
             const baseUrl = import.meta.env.VITE_API_URL || "http://localhost:8000";
@@ -82,12 +87,14 @@ export const AuditAccessTab = ({ activeTab, onTabChange }: AuditAccessTabProps) 
         } catch (error) {
             console.error("Ошибка экспорта:", error);
             alert("Не удалось скачать файл");
+        } finally {
+            exportRef.current = false;
+            setIsExporting(false); // ✅ Снимаем блокировку в конце
         }
     };
 
     return (
         <div className="flex flex-col h-full gap-4">
-            {/* ✅ Используем вынесенную шапку */}
             <AuditHeader
                 activeTab={activeTab}
                 onTabChange={onTabChange}
@@ -95,10 +102,11 @@ export const AuditAccessTab = ({ activeTab, onTabChange }: AuditAccessTabProps) 
                 isFetching={isFetching}
                 onRefresh={refetch}
                 onExport={handleExport}
+                isExporting={isExporting} // ✅ Передаём
             />
 
             {/* Фильтры */}
-            <div className="bg-card border rounded-lg p-3 flex flex-wrap gap-3 items-center shadow-sm shrink-0">
+            <div className="bg-muted/40 border rounded-lg p-3 flex flex-wrap gap-3 items-center shadow-sm shrink-0">
                 {/* Пользователь */}
                 <div className="flex items-center gap-2 border rounded-md px-3 h-9 bg-background w-[320px] shrink-0">
                     <User className="h-4 w-4 text-muted-foreground shrink-0" />
@@ -109,13 +117,14 @@ export const AuditAccessTab = ({ activeTab, onTabChange }: AuditAccessTabProps) 
                                 const items: ReferenceItem[] = (response?.data?.items ?? []).map((u: any) => ({ id: u.email, name: u.email, description: u.name }));
                                 return { items, total: response?.data?.total ?? 0 };
                             }}
-                            queryKey={["users-for-access-filter"]}
+                            queryKey={["users-for-audit-filter"]}
                             value={userEmailFilter || ""}
                             onValueChange={(value) => { setUserEmailFilter(value || undefined); setPage(1); }}
                             placeholder="Все пользователи"
                             selectedLabel={userEmailFilter || "Все пользователи"}
                             heading="Выберите пользователя"
                             columns={[{ column: "description", label: "Имя" }]}
+                            triggerClassName="border-0 shadow-none focus:ring-0 h-auto p-0 bg-transparent text-sm"
                         />
                     </div>
                     {userEmailFilter && (
@@ -126,19 +135,23 @@ export const AuditAccessTab = ({ activeTab, onTabChange }: AuditAccessTabProps) 
                 </div>
 
                 {/* Действие */}
-                <div className="flex items-center gap-2 border rounded-md px-3 h-9 bg-background w-[180px] shrink-0">
+                <div className="flex items-center gap-2 border rounded-md px-3 h-9 bg-background min-w-[180px] shrink-0">
                     <Settings2 className="h-4 w-4 text-muted-foreground shrink-0" />
                     <div className="flex-1 min-w-0">
-                        <select
-                            value={actionFilter || ""}
-                            onChange={(e) => { setActionFilter(e.target.value || undefined); setPage(1); }}
-                            className="w-full bg-transparent border-none outline-none text-sm"
+                        <Select
+                            value={actionFilter || "all"}
+                            onValueChange={(val) => { setActionFilter(val === "all" ? undefined : val); setPage(1); }}
                         >
-                            <option value="">Все действия</option>
-                            <option value="login">Вход</option>
-                            <option value="logout">Выход</option>
-                            <option value="access_denied">Доступ запрещен</option>
-                        </select>
+                            <SelectTrigger className="border-0 shadow-none focus:ring-0 h-auto p-0 bg-transparent text-sm text-muted-foreground">
+                                <SelectValue placeholder="Все действия" />
+                            </SelectTrigger>
+                            <SelectContent position="popper" align="start" className="min-w-[180px]">
+                                <SelectItem value="all">Все действия</SelectItem>
+                                <SelectItem value="login">Вход</SelectItem>
+                                <SelectItem value="logout">Выход</SelectItem>
+                                <SelectItem value="access_denied">Доступ запрещен</SelectItem>
+                            </SelectContent>
+                        </Select>
                     </div>
                     {actionFilter && (
                         <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground" onClick={() => { setActionFilter(undefined); setPage(1); }}>
@@ -151,15 +164,19 @@ export const AuditAccessTab = ({ activeTab, onTabChange }: AuditAccessTabProps) 
                 <div className="flex items-center gap-2 border rounded-md px-3 h-9 bg-background w-[180px] shrink-0">
                     <Search className="h-4 w-4 text-muted-foreground shrink-0" />
                     <div className="flex-1 min-w-0">
-                        <select
-                            value={statusFilter || ""}
-                            onChange={(e) => { setStatusFilter(e.target.value || undefined); setPage(1); }}
-                            className="w-full bg-transparent border-none outline-none text-sm"
+                        <Select
+                            value={statusFilter || "all"}
+                            onValueChange={(val) => { setStatusFilter(val === "all" ? undefined : val); setPage(1); }}
                         >
-                            <option value="">Все статусы</option>
-                            <option value="success">Успешно</option>
-                            <option value="fail">Ошибка</option>
-                        </select>
+                            <SelectTrigger className="border-0 shadow-none focus:ring-0 h-auto p-0 bg-transparent text-sm text-muted-foreground">
+                                <SelectValue placeholder="Все статусы" />
+                            </SelectTrigger>
+                            <SelectContent position="popper" align="start" className="min-w-[180px]">
+                                <SelectItem value="all">Все статусы</SelectItem>
+                                <SelectItem value="success">Успешно</SelectItem>
+                                <SelectItem value="fail">Ошибка</SelectItem>
+                            </SelectContent>
+                        </Select>
                     </div>
                     {statusFilter && (
                         <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground" onClick={() => { setStatusFilter(undefined); setPage(1); }}>
@@ -227,17 +244,17 @@ export const AuditAccessTab = ({ activeTab, onTabChange }: AuditAccessTabProps) 
             {isLoading ? (
                 <div className="text-center py-8 flex-1">Загрузка...</div>
             ) : items.length ? (
-                <div className="w-full overflow-x-auto overflow-y-auto h-[calc(100dvh-420px)] rounded-md border relative">
-                    <Table className="table-fixed w-full min-w-[800px]">
-                        {/* ✅ Непрозрачный фон у заголовка */}
-                        <TableHeader className="bg-background border-b sticky top-0 z-20 shadow-sm">
+                <div className="w-full overflow-x-auto overflow-y-auto h-[calc(100dvh-350px)] rounded-md border relative">
+                    {/* ✅ Изменена минимальная ширина, так как колонок стало меньше */}
+                    <Table className="table-fixed w-full min-w-[700px]">
+                        <TableHeader className="bg-background border-b sticky top-0 z-20 shadow-sm h-[37px]">
                             <TableRow className="hover:bg-transparent">
-                                <TableHead className="w-[25%] font-semibold text-foreground">Пользователь</TableHead>
-                                <TableHead className="w-[15%] font-semibold text-foreground">Действие</TableHead>
-                                <TableHead className="w-[20%] font-semibold text-foreground">Ресурс</TableHead>
+                                {/* ✅ Обновлены проценты ширины: убрали 20% у ресурса, распределили */}
+                                <TableHead className="w-[30%] font-semibold text-foreground">Пользователь</TableHead>
+                                <TableHead className="w-[20%] font-semibold text-foreground">Действие</TableHead>
                                 <TableHead className="w-[15%] font-semibold text-foreground">Статус</TableHead>
-                                <TableHead className="w-[15%] font-semibold text-foreground">IP</TableHead>
-                                <TableHead className="w-[10%] font-semibold text-foreground">Время</TableHead>
+                                <TableHead className="w-[20%] font-semibold text-foreground">IP</TableHead>
+                                <TableHead className="w-[15%] font-semibold text-foreground">Время</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody className={isFetching && !isLoading ? "opacity-60 transition-opacity" : ""}>
@@ -257,7 +274,8 @@ export const AuditAccessTab = ({ activeTab, onTabChange }: AuditAccessTabProps) 
                                         {showDateHeader && (
                                             // ✅ Непрозрачный фон и z-10 (ниже заголовка)
                                             <TableRow className="bg-muted hover:bg-muted border-y sticky top-[37px] z-10 shadow-sm">
-                                                <TableCell colSpan={6} className="py-2 px-4 font-semibold text-muted-foreground text-xs uppercase tracking-wider">
+                                                {/* ✅ Уменьшили colSpan с 6 до 5 */}
+                                                <TableCell colSpan={5} className="py-2 px-4 font-semibold text-muted-foreground text-xs uppercase tracking-wider">
                                                     {currentDate}
                                                 </TableCell>
                                             </TableRow>
@@ -284,16 +302,11 @@ export const AuditAccessTab = ({ activeTab, onTabChange }: AuditAccessTabProps) 
                                                     log.action
                                                 )}
                                             </TableCell>
-                                            <TableCell className="align-top truncate" title={log.resource}>
-                                                {log.resource}
-                                            </TableCell>
                                             <TableCell className="align-top">
-                                                <Badge
-                                                    variant={log.status === "success" ? "default" : "destructive"}
-                                                    className={log.status === "success" ? "bg-green-600 text-white hover:bg-green-700" : ""}
-                                                >
+                                                {/* ✅ Мягкий статус без плашки */}
+                                                <span className={`font-medium ${log.status === "success" ? "text-green-600" : "text-red-600"}`}>
                                                     {log.status === "success" ? "Успешно" : "Ошибка"}
-                                                </Badge>
+                                                </span>
                                             </TableCell>
                                             <TableCell className="align-top truncate">{log.ip_address}</TableCell>
                                             <TableCell className="align-top whitespace-nowrap text-xs">
@@ -325,6 +338,7 @@ export const AuditAccessTab = ({ activeTab, onTabChange }: AuditAccessTabProps) 
                     onPageChange={setPage}
                     onPageSizeChange={(val) => { setPageSize(Number(val)); setPage(1); }}
                     onJumpInputChange={setJumpInput}
+
                 />
             </div>
         </div>

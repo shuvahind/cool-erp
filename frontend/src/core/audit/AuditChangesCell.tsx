@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ArrowRight } from "lucide-react";
 
 const formatAuditValue = (val: any) => {
     if (val === null || val === undefined || val === "") return "пусто";
@@ -37,7 +38,7 @@ export const AuditChangesCell = ({
                             <Badge variant="destructive" className="text-[9px] px-1 py-0 h-4 mt-0.5 shrink-0">
                                 Удалено
                             </Badge>
-                            <span className="text-gray-500 break-words">
+                            <span className="text-muted-foreground break-words">
                                 {trimmed.replace("[Удалено]", "").trim()}
                             </span>
                         </div>
@@ -46,10 +47,10 @@ export const AuditChangesCell = ({
                 if (trimmed.startsWith("[Добавлен]")) {
                     return (
                         <div key={idx} className="flex items-start gap-1 mb-1">
-                            <Badge variant="default" className="bg-green-600 text-[9px] px-1 py-0 h-4 mt-0.5 shrink-0">
+                            <Badge variant="default" className="bg-green-600 text-white text-[9px] px-1 py-0 h-4 mt-0.5 shrink-0">
                                 Добавлен
                             </Badge>
-                            <span className="text-green-700 font-medium break-words">
+                            <span className="text-green-600 dark:text-green-400 font-medium break-words">
                                 {trimmed.replace("[Добавлен]", "").trim()}
                             </span>
                         </div>
@@ -63,13 +64,13 @@ export const AuditChangesCell = ({
             });
         }
         return (
-            <span className="text-green-600 font-medium break-words">{text}</span>
+            <span className="text-green-600 dark:text-green-400 font-medium break-words">{text}</span>
         );
     };
 
     return (
         <div className="space-y-1 text-xs w-full">
-            <div className="w-full">
+            <div className="w-full space-y-1.5">
                 {visibleEntries.map(([field, val]: [string, any]) => {
                     const oldVal = formatAuditValue(val?.old);
                     const newVal = formatAuditValue(val?.new);
@@ -77,37 +78,43 @@ export const AuditChangesCell = ({
                     const isNewEmpty = newVal === "пусто";
                     const isOldEmpty = oldVal === "пусто";
 
+                    const showArrow = action === "update" && !isOldEmpty;
+
                     return (
                         <div
                             key={field}
-                            className="mb-2 border-b border-gray-100 pb-1 last:border-0 last:pb-0"
+                            // ✅ Используем border-border вместо border-gray-100
+                            className="flex items-start gap-2 py-1 border-b border-border last:border-0 last:pb-0"
                         >
-                            <div className="font-semibold text-gray-700 mb-0.5">{field}:</div>
-                            <div className="flex flex-col gap-1">
-                                {action !== "create" && !isOldEmpty && (
-                                    <div className="text-gray-400 text-[10px] mb-1 break-words whitespace-pre-wrap">
-                                        {oldVal}
-                                    </div>
-                                )}
+                            {/* Имя поля: ✅ text-foreground вместо text-gray-700 */}
+                            <div className="font-semibold text-foreground w-[120px] shrink-0 break-words">
+                                {field}:
+                            </div>
+
+                            {/* Старое значение: ✅ text-muted-foreground вместо text-gray-400 */}
+                            {(action === "update" || action === "delete") && !isOldEmpty && (
+                                <div className="text-muted-foreground text-[10px] w-[25%] shrink-0 break-words">
+                                    {oldVal}
+                                </div>
+                            )}
+
+                            {/* Стрелка: ✅ text-muted-foreground вместо text-gray-300 */}
+                            {showArrow && (
+                                <ArrowRight className="h-3 w-3 text-muted-foreground mt-0.5 shrink-0" />
+                            )}
+
+                            <div className="flex-1 break-words">
                                 {action === "update" ? (
-                                    <div className="break-words whitespace-pre-wrap">
-                                        {isNewEmpty ? (
-                                            <div className="flex items-start gap-1 mb-1">
-                                                <Badge variant="destructive" className="text-[9px] px-1 py-0 h-4 mt-0.5 shrink-0">
-                                                    Удалено
-                                                </Badge>
-                                            </div>
-                                        ) : (
-                                            renderNewValue(newVal)
-                                        )}
-                                    </div>
-                                ) : (
-                                    action !== "delete" && !isNewEmpty && (
-                                        <div className="break-words whitespace-pre-wrap">
-                                            {renderNewValue(newVal)}
-                                        </div>
+                                    isNewEmpty ? (
+                                        <Badge variant="destructive" className="text-[9px] px-1 py-0 h-4">
+                                            Удалено
+                                        </Badge>
+                                    ) : (
+                                        renderNewValue(newVal)
                                     )
-                                )}
+                                ) : action === "create" ? (
+                                    !isNewEmpty && renderNewValue(newVal)
+                                ) : null}
                             </div>
                         </div>
                     );
@@ -118,7 +125,8 @@ export const AuditChangesCell = ({
                 <Button
                     variant="link"
                     size="sm"
-                    className="text-xs h-6 px-0 text-blue-600 mt-1 font-semibold"
+                    // ✅ Кнопка теперь использует muted-foreground (серый в светлой, светло-серый в темной)
+                    className="text-xs h-6 px-0 text-muted-foreground hover:text-foreground mt-1 font-semibold"
                     onClick={() => setIsExpanded((v) => !v)}
                 >
                     {isExpanded ? "Свернуть" : `Показать все (${entries.length - LIMIT})`}

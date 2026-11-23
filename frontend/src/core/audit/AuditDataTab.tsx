@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { format } from "date-fns";
 import { ru } from "date-fns/locale";
 import type { DateRange } from "react-day-picker";
@@ -13,10 +13,9 @@ import { useListDataAuditApiV1AuditDataGet } from "@/api/generated/audit-access-
 import { User, X, CalendarIcon, FileText, Settings2, Search, Plus, Pencil, Trash2 } from "lucide-react";
 import { AuditPagination } from "./AuditPagination";
 import { AuditChangesCell } from "./AuditChangesCell";
-import { AuditHeader } from "./AuditHeader"; // ✅ ИМПОРТ ШАПКИ
+import { AuditHeader } from "./AuditHeader";
 import React from "react";
-
-
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const isUUID = (str: string): boolean => {
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
@@ -45,6 +44,9 @@ export const AuditDataTab = ({ activeTab, onTabChange }: AuditDataTabProps) => {
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(20);
     const [jumpInput, setJumpInput] = useState("");
+
+    const [isExporting, setIsExporting] = useState(false);
+    const exportRef = useRef(false); // ✅ Мгновенный флаг
 
     const [entityTypeFilter, setEntityTypeFilter] = useState<string | undefined>(undefined);
     const [actionFilter, setActionFilter] = useState<string | undefined>(undefined);
@@ -102,6 +104,9 @@ export const AuditDataTab = ({ activeTab, onTabChange }: AuditDataTabProps) => {
         if (endDate) params.append("end_date", endDate);
         if (isEntityIdUuid) params.append("entity_id", entityIdFilter!);
         if (!isEntityIdUuid && entityIdFilter) params.append("entity_name", entityIdFilter);
+        if (exportRef.current) return; // ✅ Если уже качаем — выходим
+        exportRef.current = true;
+        setIsExporting(true);
 
         try {
             const baseUrl = import.meta.env.VITE_API_URL || "http://localhost:8000";
@@ -126,6 +131,9 @@ export const AuditDataTab = ({ activeTab, onTabChange }: AuditDataTabProps) => {
         } catch (error) {
             console.error("Ошибка экспорта:", error);
             alert("Не удалось скачать файл");
+        } finally {
+            exportRef.current = false;
+            setIsExporting(false); // ✅ Снимаем блокировку в конце
         }
     };
 
@@ -155,8 +163,7 @@ export const AuditDataTab = ({ activeTab, onTabChange }: AuditDataTabProps) => {
     };
 
     return (
-        <div className="flex flex-col gap-4">
-            {/* ✅ Используем вынесенную шапку */}
+        <div className="flex flex-col h-full gap-4">
             <AuditHeader
                 activeTab={activeTab}
                 onTabChange={onTabChange}
@@ -164,10 +171,11 @@ export const AuditDataTab = ({ activeTab, onTabChange }: AuditDataTabProps) => {
                 isFetching={isFetching}
                 onRefresh={refetch}
                 onExport={handleExport}
+                isExporting={isExporting} // ✅ Передаём
             />
 
-            {/* Блок фильтров */}
-            <div className="bg-card border rounded-lg p-3 flex flex-wrap gap-3 items-center shadow-sm shrink-0">
+            {/* ✅ Блок фильтров (возвращён) */}
+            <div className="bg-muted/40 border rounded-lg p-3 flex flex-wrap gap-3 items-center shadow-sm shrink-0">
                 {/* Пользователь */}
                 <div className="flex items-center gap-2 border rounded-md px-3 h-9 bg-background w-[320px] shrink-0">
                     <User className="h-4 w-4 text-muted-foreground shrink-0" />
@@ -185,6 +193,7 @@ export const AuditDataTab = ({ activeTab, onTabChange }: AuditDataTabProps) => {
                             selectedLabel={userEmailFilter || "Все пользователи"}
                             heading="Выберите пользователя"
                             columns={[{ column: "description", label: "Имя" }]}
+                            triggerClassName="border-0 shadow-none focus:ring-0 h-auto p-0 bg-transparent text-sm w-full"
                         />
                     </div>
                     {userEmailFilter && (
@@ -215,6 +224,7 @@ export const AuditDataTab = ({ activeTab, onTabChange }: AuditDataTabProps) => {
                             placeholder="Все типы"
                             selectedLabel={entityTypeFilter ? entityTypeOptions.find((o) => o.value === entityTypeFilter)?.label || "Все типы" : "Все типы"}
                             heading="Тип сущности"
+                            triggerClassName="border-0 shadow-none focus:ring-0 h-auto p-0 bg-transparent text-sm w-full"
                         />
                     </div>
                     {entityTypeFilter && (
@@ -241,20 +251,24 @@ export const AuditDataTab = ({ activeTab, onTabChange }: AuditDataTabProps) => {
                 </div>
 
                 {/* Действие */}
-                <div className="flex items-center gap-2 border rounded-md px-3 h-9 bg-background w-[180px] shrink-0">
+                <div className="flex items-center gap-2 border rounded-md px-3 h-9 bg-background min-w-[180px] shrink-0">
                     <Settings2 className="h-4 w-4 text-muted-foreground shrink-0" />
                     <div className="flex-1 min-w-0">
-                        <select
-                            value={actionFilter || ""}
-                            onChange={(e) => { setActionFilter(e.target.value || undefined); setPage(1); }}
-                            className="w-full bg-transparent border-none outline-none text-sm"
+                        <Select
+                            value={actionFilter || "all"}
+                            onValueChange={(val) => { setActionFilter(val === "all" ? undefined : val); setPage(1); }}
                         >
-                            {actionOptions.map((option) => (
-                                <option key={option.value || "all"} value={option.value}>
-                                    {option.label}
-                                </option>
-                            ))}
-                        </select>
+                            <SelectTrigger className="border-0 shadow-none focus:ring-0 h-auto p-0 bg-transparent text-sm text-muted-foreground w-full">
+                                <SelectValue placeholder="Все действия" />
+                            </SelectTrigger>
+                            <SelectContent position="popper" align="start" className="min-w-[180px]">
+                                {actionOptions.map((option) => (
+                                    <SelectItem key={option.value || "all"} value={option.value || "all"}>
+                                        {option.label}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
                     </div>
                     {actionFilter && (
                         <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground" onClick={() => { setActionFilter(undefined); setPage(1); }}>
@@ -324,10 +338,10 @@ export const AuditDataTab = ({ activeTab, onTabChange }: AuditDataTabProps) => {
             {isLoading ? (
                 <div className="text-center py-8 flex-1">Загрузка...</div>
             ) : items.length ? (
-                <div className="w-full overflow-x-auto overflow-y-auto h-[calc(100dvh-420px)] rounded-md border relative">
+                /* ✅ Увеличили высоту: было 420px, стало 380px (таблица стала выше) */
+                <div className="w-full overflow-x-auto overflow-y-auto h-[calc(100dvh-350px)] rounded-md border relative">
                     <Table className="table-fixed w-full min-w-[800px]">
-                        {/* ✅ Таблица: непрозрачный фон для заголовка */}
-                        <TableHeader className="bg-background border-b sticky top-0 z-20 shadow-sm">
+                        <TableHeader className="bg-background border-b sticky top-0 z-20 shadow-sm h-[37px]">
                             <TableRow className="hover:bg-transparent">
                                 <TableHead className="w-[15%] font-semibold text-foreground">Пользователь</TableHead>
                                 <TableHead className="w-[10%] font-semibold text-foreground">Тип</TableHead>
@@ -352,7 +366,7 @@ export const AuditDataTab = ({ activeTab, onTabChange }: AuditDataTabProps) => {
                                 return (
                                     <React.Fragment key={change.id}>
                                         {showDateHeader && (
-                                            // ✅ Строка с датой: непрозрачный фон и z-10 (ниже заголовка)
+                                            /* ✅ Sticky для даты работает, так как нет вложенных overflow-auto */
                                             <TableRow className="bg-muted hover:bg-muted border-y sticky top-[37px] z-10 shadow-sm">
                                                 <TableCell colSpan={6} className="py-2 px-4 font-semibold text-muted-foreground text-xs uppercase tracking-wider">
                                                     {currentDate}
