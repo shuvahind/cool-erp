@@ -1,0 +1,7 @@
+src/core/audit/
+├── AuditPage.tsx           (главный, только табы)
+├── AuditHeader.tsx         (заголовок "Аудит", табы, кнопки "Обновить" и "Экспорт")
+├── AuditAccessTab.tsx      (логи входа + фильтры + таблица + пагинация)
+├── AuditDataTab.tsx        (изменения данных + фильтры + таблица + пагинация)
+├── AuditPagination.tsx     (переиспользуемая пагинация)
+└── AuditChangesCell.tsx    (ячейка с диффом)
