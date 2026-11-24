@@ -242,3 +242,36 @@
   --link: 22 60% 40%;
   --link-hover: 22 65% 30%;
 }
+
+/* ==========================================
+   КАСТОМНЫЙ СКРОЛЛБАР
+   ========================================== */
+
+/* Для WebKit браузеров (Chrome, Edge, Safari) */
+::-webkit-scrollbar {
+  width: 8px;  /* Вертикальный скролл */
+  height: 8px; /* Горизонтальный скролл */
+}
+
+::-webkit-scrollbar-track {
+  background: transparent; /* Фон скроллбара прозрачный */
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border)); /* Используем переменную вашей темы */
+  border-radius: 10px;
+  border: 2px solid transparent; /* Создаёт эффект "отступа" внутри дорожки */
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.5); /* При наведении становится заметнее */
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+/* Для Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--border)) transparent;
+}

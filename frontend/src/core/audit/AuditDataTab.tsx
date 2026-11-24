@@ -338,7 +338,7 @@ export const AuditDataTab = ({ activeTab, onTabChange }: AuditDataTabProps) => {
             {isLoading ? (
                 <div className="text-center py-8 flex-1">Загрузка...</div>
             ) : items.length ? (
-                /* ✅ Увеличили высоту: было 420px, стало 380px (таблица стала выше) */
+                /* ✅ Увеличили высоту: 350px (таблица стала выше) */
                 <div className="w-full overflow-x-auto overflow-y-auto h-[calc(100dvh-350px)] rounded-md border relative">
                     <Table className="table-fixed w-full min-w-[800px]">
                         <TableHeader className="bg-background border-b sticky top-0 z-20 shadow-sm h-[37px]">
